@@ -151,6 +151,3 @@ func main() {
 	fmt.Printf("Part 1: %d\n", part1(lines))
 	fmt.Printf("Part 2: %d\n", part2(lines))
 }
-
-//part 1 answer = 4776100539
-//part 2 =1476550548
