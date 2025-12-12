@@ -10,112 +10,304 @@ import (
 
 func part1(lines []string) int {
 	machineSchematics := parseInput(lines)
-	clicks := 0
+	totalClicks := 0
 	for _, machine := range machineSchematics {
 		fewestClicks := findFewestButtonClicksForLightMode(machine)
 		fmt.Printf("Fewest Clicks: %d\n", fewestClicks)
-		clicks += fewestClicks
+		totalClicks += fewestClicks
 	}
-	return clicks
+	return totalClicks
+}
+
+func part2(lines []string) int {
+	machineSchematics := parseInput(lines)
+	totalClicks := 0
+	for _, machine := range machineSchematics {
+		fewestClicks := findFewestButtonClicksForJoltageMode(machine)
+		fmt.Printf("Fewest Clicks: %d\n", fewestClicks)
+		totalClicks += fewestClicks
+	}
+	return totalClicks
 }
 
 func findFewestButtonClicksForLightMode(machine MachineSchematic) int {
 	initialState := MachineState{IndicatorLights: make([]bool, len(machine.IndicatorLights))}
-	currentMachineStates := []MachineState{
-		initialState,
-	}
+	currentStates := []MachineState{initialState}
 	exploredStates := map[string]bool{
-		getStateKey(initialState): true,
+		getIndicatorLightStateKey(initialState): true,
 	}
-	newMachineStates := []MachineState{}
-	unsolved := true
-	clicks := 0
-	for unsolved {
-		for _, machineState := range currentMachineStates {
-			for _, button := range machine.Buttons {
-				newMachineState := generateNewState(machineState, button)
-				stateKey := getStateKey(newMachineState)
-				if !exploredStates[stateKey] {
-					if isSolved(machine.IndicatorLights, newMachineState.IndicatorLights) {
-						unsolved = false
-						return clicks + 1
-					}
-					newMachineStates = append(newMachineStates, newMachineState)
-					exploredStates[stateKey] = true
-				}
-			}
-		}
-		currentMachineStates = newMachineStates
-		newMachineStates = []MachineState{}
-		clicks++
-	}
-	return 0
-}
 
-// this isn't performant enough to work yet, checking  in to go to bed.
-func findFewestButtonClicksForJoltageMode(machine MachineSchematic) int {
-	initialState := make([]int, len(machine.JoltageRequirements)) //all zeros
-	currentMachineStates := [][]int{
-		initialState,
-	}
-	newMachineStates := [][]int{}
-	unsolved := true
 	clicks := 0
-	for unsolved {
-		for _, machineState := range currentMachineStates {
+	for len(currentStates) > 0 {
+		nextStates := []MachineState{}
+
+		for _, currentState := range currentStates {
 			for _, button := range machine.Buttons {
-				newMachineState := generateNewJoltageState(machineState, button)
-				//stateKey := getJoltageStateKey(newMachineState)
-				//if !exploredStates[stateKey] {
-				if isJoltageSolved(machine.JoltageRequirements, newMachineState) {
-					unsolved = false
+				newState := applyButtonToIndicatorLights(currentState, button)
+				stateKey := getIndicatorLightStateKey(newState)
+
+				if exploredStates[stateKey] {
+					continue
+				}
+
+				if indicatorLightsMatch(machine.IndicatorLights, newState.IndicatorLights) {
 					return clicks + 1
 				}
-				busted := getBusted(machine.JoltageRequirements, newMachineState)
-				if busted {
-					continue
-				} else {
-					newMachineStates = append(newMachineStates, newMachineState)
-				}
-				//exploredStates[stateKey] = true
-				//}
+
+				nextStates = append(nextStates, newState)
+				exploredStates[stateKey] = true
 			}
 		}
-		currentMachineStates = newMachineStates
-		newMachineStates = [][]int{}
+
+		currentStates = nextStates
 		clicks++
 	}
+
 	return 0
 }
 
-func getBusted(goalJoltage []int, currentJoltage []int) bool {
-	for index, joltage := range currentJoltage {
-		if joltage > goalJoltage[index] {
-			return true
+func findFewestButtonClicksForJoltageMode(machine MachineSchematic) int {
+	coefficientMatrix := buildCoefficientMatrix(machine)
+	joltageRequirements := make([]int, len(machine.JoltageRequirements))
+	copy(joltageRequirements, machine.JoltageRequirements)
+
+	convertToRowEchelonForm(&coefficientMatrix, &joltageRequirements)
+
+	return solveForMinimumButtonPresses(coefficientMatrix, joltageRequirements)
+}
+
+func buildCoefficientMatrix(machine MachineSchematic) [][]int {
+	numRegisters := len(machine.JoltageRequirements)
+	numButtons := len(machine.Buttons)
+
+	matrix := make([][]int, numRegisters)
+	for registerIndex := 0; registerIndex < numRegisters; registerIndex++ {
+		matrix[registerIndex] = make([]int, numButtons)
+	}
+
+	for buttonIndex, button := range machine.Buttons {
+		for _, registerIndex := range button.Toggle {
+			matrix[registerIndex][buttonIndex] = 1
 		}
 	}
-	return false
+
+	return matrix
 }
 
-func isJoltageSolved(goalJoltage []int, currentJoltage []int) bool {
-	for index, joltage := range goalJoltage {
-		if joltage != currentJoltage[index] {
-			return false
+func convertToRowEchelonForm(matrix *[][]int, rightHandSide *[]int) {
+	numRows := len(*matrix)
+	if numRows == 0 {
+		return
+	}
+	numColumns := len((*matrix)[0])
+
+	currentRow := 0
+	currentColumn := 0
+
+	for currentRow < numRows && currentColumn < numColumns {
+		pivotRow := findPivotRow(*matrix, currentRow, currentColumn)
+
+		if pivotRow == -1 {
+			currentColumn++
+			continue
+		}
+
+		if pivotRow != currentRow {
+			swapRows(matrix, rightHandSide, currentRow, pivotRow)
+		}
+
+		eliminateBelowPivot(matrix, rightHandSide, currentRow, currentColumn)
+
+		currentRow++
+		currentColumn++
+	}
+}
+
+func findPivotRow(matrix [][]int, startRow int, column int) int {
+	for row := startRow; row < len(matrix); row++ {
+		if matrix[row][column] != 0 {
+			return row
 		}
 	}
-	return true
+	return -1
 }
 
-func generateNewJoltageState(state []int, button Button) []int {
-	newState := make([]int, len(state))
-	copy(newState, state)
-	for _, toggle := range button.Toggle {
-		newState[toggle]++
+func swapRows(matrix *[][]int, rightHandSide *[]int, row1 int, row2 int) {
+	(*matrix)[row1], (*matrix)[row2] = (*matrix)[row2], (*matrix)[row1]
+	(*rightHandSide)[row1], (*rightHandSide)[row2] = (*rightHandSide)[row2], (*rightHandSide)[row1]
+}
+
+func eliminateBelowPivot(matrix *[][]int, rightHandSide *[]int, pivotRow int, pivotColumn int) {
+	pivotValue := (*matrix)[pivotRow][pivotColumn]
+	numRows := len(*matrix)
+	numColumns := len((*matrix)[0])
+
+	for row := pivotRow + 1; row < numRows; row++ {
+		if (*matrix)[row][pivotColumn] == 0 {
+			continue
+		}
+
+		currentValue := (*matrix)[row][pivotColumn]
+
+		// To preserve integer arithmetic: row = row * pivotValue - pivotRow * currentValue
+		for column := pivotColumn; column < numColumns; column++ {
+			(*matrix)[row][column] = (*matrix)[row][column]*pivotValue - (*matrix)[pivotRow][column]*currentValue
+		}
+		(*rightHandSide)[row] = (*rightHandSide)[row]*pivotValue - (*rightHandSide)[pivotRow]*currentValue
 	}
-	return newState
 }
 
-func getStateKey(state MachineState) string {
+func solveForMinimumButtonPresses(matrix [][]int, joltageRequirements []int) int {
+	numRows := len(matrix)
+	if numRows == 0 {
+		return 0
+	}
+	numColumns := len(matrix[0])
+
+	pivotColumns, freeVariableColumns := identifyPivotAndFreeVariables(matrix)
+	upperBound := calculateSearchUpperBound(joltageRequirements, freeVariableColumns)
+
+	minimumClicks := -1
+	buttonPresses := make([]int, numColumns)
+
+	searchFreeVariableCombinations(0, freeVariableColumns, upperBound, buttonPresses,
+		matrix, joltageRequirements, pivotColumns, &minimumClicks)
+
+	if minimumClicks == -1 {
+		return 0
+	}
+	return minimumClicks
+}
+
+func identifyPivotAndFreeVariables(matrix [][]int) ([]int, []int) {
+	numRows := len(matrix)
+	numColumns := len(matrix[0])
+
+	pivotColumns := make([]int, numRows)
+	isPivot := make([]bool, numColumns)
+
+	for row := 0; row < numRows; row++ {
+		pivotColumns[row] = -1
+		for column := 0; column < numColumns; column++ {
+			if matrix[row][column] != 0 {
+				pivotColumns[row] = column
+				isPivot[column] = true
+				break
+			}
+		}
+	}
+
+	freeVariableColumns := []int{}
+	for column := 0; column < numColumns; column++ {
+		if !isPivot[column] {
+			freeVariableColumns = append(freeVariableColumns, column)
+		}
+	}
+
+	return pivotColumns, freeVariableColumns
+}
+
+func calculateSearchUpperBound(joltageRequirements []int, freeVariableColumns []int) int {
+	maxJoltage := 0
+	for _, requirement := range joltageRequirements {
+		if requirement > maxJoltage {
+			maxJoltage = requirement
+		}
+	}
+
+	upperBound := maxJoltage
+	if len(freeVariableColumns) == 0 {
+		upperBound = 0
+	} else if upperBound > 200 {
+		upperBound = 200
+	}
+
+	return upperBound
+}
+
+func searchFreeVariableCombinations(
+	freeVariableIndex int,
+	freeVariableColumns []int,
+	upperBound int,
+	buttonPresses []int,
+	matrix [][]int,
+	joltageRequirements []int,
+	pivotColumns []int,
+	minimumClicks *int,
+) {
+	if freeVariableIndex == len(freeVariableColumns) {
+		solution := solveWithBackSubstitution(buttonPresses, matrix, joltageRequirements, pivotColumns)
+		if solution == nil {
+			return
+		}
+
+		totalClicks := sumButtonPresses(solution)
+		if *minimumClicks == -1 || totalClicks < *minimumClicks {
+			*minimumClicks = totalClicks
+		}
+		return
+	}
+
+	freeVariableColumn := freeVariableColumns[freeVariableIndex]
+	for value := 0; value <= upperBound; value++ {
+		buttonPresses[freeVariableColumn] = value
+		searchFreeVariableCombinations(freeVariableIndex+1, freeVariableColumns, upperBound,
+			buttonPresses, matrix, joltageRequirements, pivotColumns, minimumClicks)
+	}
+}
+
+func solveWithBackSubstitution(
+	buttonPresses []int,
+	matrix [][]int,
+	joltageRequirements []int,
+	pivotColumns []int,
+) []int {
+	numRows := len(matrix)
+	numColumns := len(matrix[0])
+
+	solution := make([]int, numColumns)
+	copy(solution, buttonPresses)
+
+	for row := numRows - 1; row >= 0; row-- {
+		pivotColumn := pivotColumns[row]
+
+		if pivotColumn == -1 {
+			if joltageRequirements[row] != 0 {
+				return nil // Inconsistent system
+			}
+			continue
+		}
+
+		sum := 0
+		for column := pivotColumn + 1; column < numColumns; column++ {
+			sum += matrix[row][column] * solution[column]
+		}
+
+		remaining := joltageRequirements[row] - sum
+		pivotValue := matrix[row][pivotColumn]
+
+		if pivotValue == 0 || remaining%pivotValue != 0 {
+			return nil // No integer solution
+		}
+
+		solution[pivotColumn] = remaining / pivotValue
+		if solution[pivotColumn] < 0 {
+			return nil // Negative button presses not allowed
+		}
+	}
+
+	return solution
+}
+
+func sumButtonPresses(buttonPresses []int) int {
+	total := 0
+	for _, presses := range buttonPresses {
+		total += presses
+	}
+	return total
+}
+
+func getIndicatorLightStateKey(state MachineState) string {
 	key := ""
 	for _, light := range state.IndicatorLights {
 		if light {
@@ -127,35 +319,26 @@ func getStateKey(state MachineState) string {
 	return key
 }
 
-func isSolved(goalState []bool, litLights []bool) bool {
-	for lightIndex, light := range goalState {
-		if light != litLights[lightIndex] {
+func indicatorLightsMatch(goalState []bool, currentState []bool) bool {
+	for index, goalLight := range goalState {
+		if goalLight != currentState[index] {
 			return false
 		}
 	}
 	return true
 }
 
-func generateNewState(state MachineState, button Button) MachineState {
+func applyButtonToIndicatorLights(state MachineState, button Button) MachineState {
 	newState := MachineState{
 		IndicatorLights: make([]bool, len(state.IndicatorLights)),
 	}
 	copy(newState.IndicatorLights, state.IndicatorLights)
-	for _, toggle := range button.Toggle {
-		newState.IndicatorLights[toggle] = !newState.IndicatorLights[toggle]
-	}
-	return newState
-}
 
-func part2(lines []string) int {
-	machineSchematics := parseInput(lines)
-	clicks := 0
-	for _, machine := range machineSchematics {
-		fewestClicks := findFewestButtonClicksForJoltageMode(machine)
-		fmt.Printf("Fewest Clicks: %d\n", fewestClicks)
-		clicks += fewestClicks
+	for _, lightIndex := range button.Toggle {
+		newState.IndicatorLights[lightIndex] = !newState.IndicatorLights[lightIndex]
 	}
-	return clicks
+
+	return newState
 }
 func parseInput(lines []string) []MachineSchematic {
 	machineSchematics := []MachineSchematic{}
@@ -171,6 +354,7 @@ func parseSchematic(line string) MachineSchematic {
 	indicatorLights := parseIndicatorLights(parts[0])
 	buttons := parseButtons(parts[1 : len(parts)-1])
 	joltageRequirements := parseJoltageRequirements(parts[len(parts)-1])
+
 	return MachineSchematic{
 		IndicatorLights:     indicatorLights,
 		Buttons:             buttons,
@@ -179,15 +363,14 @@ func parseSchematic(line string) MachineSchematic {
 }
 
 func parseIndicatorLights(part string) []bool {
-	//is in format [##.....#.], where # is on and . is off
+	// Format: [##.....#.], where # is on and . is off
 	indicatorLights := []bool{}
-	for _, char := range part[1 : len(part)-1] {
-		if char == '#' {
-			indicatorLights = append(indicatorLights, true)
-		} else {
-			indicatorLights = append(indicatorLights, false)
-		}
+	content := part[1 : len(part)-1] // Strip brackets
+
+	for _, char := range content {
+		indicatorLights = append(indicatorLights, char == '#')
 	}
+
 	return indicatorLights
 }
 
@@ -201,30 +384,35 @@ func parseButtons(parts []string) []Button {
 }
 
 func parseButton(buttonSchematic string) Button {
-	//is in format (0,1,5,8)
-	//strip off parentheses
-	buttonSchematic = buttonSchematic[1 : len(buttonSchematic)-1]
-	lightIndices := strings.Split(buttonSchematic, ",")
+	// Format: (0,1,5,8)
+	content := buttonSchematic[1 : len(buttonSchematic)-1] // Strip parentheses
+
+	if content == "" {
+		return Button{Toggle: []int{}}
+	}
+
+	lightIndices := strings.Split(content, ",")
 	toggles := []int{}
+
 	for _, lightIndex := range lightIndices {
 		index, _ := strconv.Atoi(lightIndex)
 		toggles = append(toggles, index)
 	}
-	return Button{
-		Toggle: toggles,
-	}
+
+	return Button{Toggle: toggles}
 }
 
 func parseJoltageRequirements(part string) []int {
-	//is in format {53,78,43,44,33,73,46,81,60}
-	//strip off curly braces
-	part = part[1 : len(part)-1]
-	joltageStrings := strings.Split(part, ",")
+	// Format: {53,78,43,44,33,73,46,81,60}
+	content := part[1 : len(part)-1] // Strip curly braces
+	joltageStrings := strings.Split(content, ",")
 	joltageRequirements := []int{}
+
 	for _, joltageString := range joltageStrings {
 		joltage, _ := strconv.Atoi(joltageString)
 		joltageRequirements = append(joltageRequirements, joltage)
 	}
+
 	return joltageRequirements
 }
 
